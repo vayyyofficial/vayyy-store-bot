@@ -1,0 +1,17 @@
+{
+  "name": "vayyy-store-bot",
+  "version": "1.0.0",
+  "description": "Vayyy Store Bot 1.0",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "deploy": "node deploy-commands.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^13.0.3",
+    "discord.js": "^14.14.1",
+    "dotenv": "^16.4.5",
+    "node-cron": "^4.6.0",
+    "quick.db": "^9.1.7"
+  }
+}
