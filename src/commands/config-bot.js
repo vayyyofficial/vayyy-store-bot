@@ -1,77 +1,104 @@
 // src/commands/config-bot.js
-const { SlashCommandBuilder, PermissionFlagsBits } = require("discord.js");
+const {
+  SlashCommandBuilder,
+  PermissionFlagsBits,
+  ChannelType,
+} = require("discord.js");
 const db = require("../utils/database");
 
 module.exports = {
   data: new SlashCommandBuilder()
     .setName("config-bot")
-    .setDescription("Mengatur channel dan role khusus untuk fitur bot")
+    .setDescription("Mengatur konfigurasi channel dan role bot server")
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
     .addChannelOption((opt) =>
       opt
         .setName("welcome_channel")
-        .setDescription("Channel untuk Log Welcome"),
+        .setDescription("Channel untuk pesan member masuk")
+        .addChannelTypes(ChannelType.GuildText),
     )
     .addChannelOption((opt) =>
       opt
         .setName("goodbye_channel")
-        .setDescription("Channel untuk Log Goodbye"),
+        .setDescription("Channel untuk pesan member keluar")
+        .addChannelTypes(ChannelType.GuildText),
     )
     .addChannelOption((opt) =>
       opt
-        .setName("level_channel")
-        .setDescription("Channel Notifikasi Level Up"),
-    )
-    .addChannelOption((opt) =>
-      opt.setName("ai_channel").setDescription("Channel khusus AI Chatbot"),
+        .setName("levelup_channel")
+        .setDescription("Channel untuk notifikasi naik level")
+        .addChannelTypes(ChannelType.GuildText),
     )
     .addChannelOption((opt) =>
       opt
         .setName("honeypot_channel")
-        .setDescription("Channel Perangkap Honeypot (Auto-Kick)"),
+        .setDescription("Channel jebakan untuk bot/spammer")
+        .addChannelTypes(ChannelType.GuildText),
     )
     .addChannelOption((opt) =>
       opt
         .setName("transcript_channel")
-        .setDescription("Channel Log Transcript Tiket"),
+        .setDescription("Channel simpan transcript tiket")
+        .addChannelTypes(ChannelType.GuildText),
     )
     .addRoleOption((opt) =>
-      opt.setName("buyer_role").setDescription("Role Buyer untuk Unlimited AI"),
+      opt.setName("buyer_role").setDescription("Role khusus untuk pembeli"),
     ),
 
   async execute(interaction) {
     const guildId = interaction.guild.id;
-    const currentConfig = db.get(`config_${guildId}`) || {};
 
+    // 1. Ambil konfigurasi lama dari database (atau buat objek kosong jika belum ada)
+    const existingConfig = (await db.get(`config_${guildId}`)) || {};
+
+    // 2. Ambil nilai opsi dari input user saat ini
     const welcome = interaction.options.getChannel("welcome_channel");
     const goodbye = interaction.options.getChannel("goodbye_channel");
-    const level = interaction.options.getChannel("level_channel");
-    const ai = interaction.options.getChannel("ai_channel");
+    const levelup = interaction.options.getChannel("levelup_channel");
     const honeypot = interaction.options.getChannel("honeypot_channel");
     const transcript = interaction.options.getChannel("transcript_channel");
-    const buyer = interaction.options.getRole("buyer_role");
+    const buyerRole = interaction.options.getRole("buyer_role");
 
-    if (welcome) currentConfig.welcomeChannel = welcome.id;
-    if (goodbye) currentConfig.goodbyeChannel = goodbye.id;
-    if (level) currentConfig.levelChannel = level.id;
-    if (ai) currentConfig.aiChannel = ai.id;
-    if (honeypot) currentConfig.honeypotChannel = honeypot.id;
-    if (transcript) currentConfig.transcriptChannel = transcript.id;
-    if (buyer) currentConfig.buyerRole = buyer.id;
+    // 3. LOGIKA MERGE: Pertahankan data lama jika opsi tidak diisi (null)
+    const updatedConfig = {
+      welcomeChannel: welcome
+        ? welcome.id
+        : existingConfig.welcomeChannel || null,
+      goodbyeChannel: goodbye
+        ? goodbye.id
+        : existingConfig.goodbyeChannel || null,
+      levelupChannel: levelup
+        ? levelup.id
+        : existingConfig.levelupChannel || null,
+      honeypotChannel: honeypot
+        ? honeypot.id
+        : existingConfig.honeypotChannel || null,
+      transcriptChannel: transcript
+        ? transcript.id
+        : existingConfig.transcriptChannel || null,
+      buyerRole: buyerRole ? buyerRole.id : existingConfig.buyerRole || null,
+    };
 
-    db.set(`config_${guildId}`, currentConfig);
+    // 4. Simpan konfigurasi gabungan kembali ke database
+    await db.set(`config_${guildId}`, updatedConfig);
+
+    // 5. Fungsi pembantu untuk format tampilan response
+    const formatChan = (id) => (id ? `<#${id}>` : "Belum di-set");
+    const formatRole = (id) => (id ? `<@&${id}>` : "Belum di-set");
+
+    // 6. Tampilkan status konfigurasi terbaru
+    const responseText =
+      `✅ **Pengaturan Bot Berhasil Diperbarui!**\n\n` +
+      `• Welcome: ${formatChan(updatedConfig.welcomeChannel)}\n` +
+      `• Goodbye: ${formatChan(updatedConfig.goodbyeChannel)}\n` +
+      `• Level Up: ${formatChan(updatedConfig.levelupChannel)}\n` +
+      `• Honeypot: ${formatChan(updatedConfig.honeypotChannel)}\n` +
+      `• Transcript Logs: ${formatChan(updatedConfig.transcriptChannel)}\n` +
+      `• Buyer Role: ${formatRole(updatedConfig.buyerRole)}`;
 
     await interaction.reply({
-      content:
-        "✅ **Pengaturan Bot Berhasil Diperbarui!**\n" +
-        `- Welcome: ${currentConfig.welcomeChannel ? `<#${currentConfig.welcomeChannel}>` : "Belum di-set"}\n` +
-        `- Goodbye: ${currentConfig.goodbyeChannel ? `<#${currentConfig.goodbyeChannel}>` : "Belum di-set"}\n` +
-        `- Level Up: ${currentConfig.levelChannel ? `<#${currentConfig.levelChannel}>` : "Belum di-set"}\n` +
-        `- AI Chat: ${currentConfig.aiChannel ? `<#${currentConfig.aiChannel}>` : "Belum di-set"}\n` +
-        `- Honeypot: ${currentConfig.honeypotChannel ? `<#${currentConfig.honeypotChannel}>` : "Belum di-set"}\n` +
-        `- Transcript Logs: ${currentConfig.transcriptChannel ? `<#${currentConfig.transcriptChannel}>` : "Belum di-set"}\n` +
-        `- Buyer Role: ${currentConfig.buyerRole ? `<@&${currentConfig.buyerRole}>` : "Belum di-set"}`,
-      ephemeral: true,
+      content: responseText,
+      flags: 64,
     });
   },
 };

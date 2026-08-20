@@ -1,63 +1,72 @@
 // src/utils/giveawayManager.js
 const db = require("./database");
-const { getEmbedTemplate } = require("./featureEmbed");
+const { sendFeatureEmbed } = require("./featureEmbed");
+const { buildGiveawayPlaceholders } = require("./placeholder");
 
 /**
  * Memilih pemenang secara acak dari array peserta
  */
 function pickWinners(participants, count) {
+  if (!Array.isArray(participants) || participants.length === 0) return [];
   const shuffled = [...participants].sort(() => 0.5 - Math.random());
-  return shuffled.slice(0, count);
+  return shuffled.slice(0, Math.min(count, 10)); // Batas maksimum 10 pemenang
 }
 
 /**
  * Menyelesaikan Giveaway & Mengumumkan Pemenang
  */
 async function endGiveaway(client, giveawayId) {
-  const gw = db.get(`giveaway_${giveawayId}`);
+  const gw = await db.get(`giveaway_${giveawayId}`);
   if (!gw || gw.ended) return;
 
+  gw.ended = true;
+  await db.set(`giveaway_${giveawayId}`, gw);
+
   try {
-    const guild = await client.guilds.fetch(gw.guildId);
-    const channel = await guild.channels.fetch(gw.channelId);
-    const message = await channel.messages.fetch(gw.messageId);
+    if (!client || !client.guilds) return;
+
+    const guild = await client.guilds.fetch(gw.guildId).catch(() => null);
+    if (!guild) return;
+
+    const channel = await guild.channels.fetch(gw.channelId).catch(() => null);
+    if (!channel) return;
+
+    const message = await channel.messages
+      .fetch(gw.messageId)
+      .catch(() => null);
 
     const winners = pickWinners(gw.participants, gw.winnerCount);
-    const winnersMention =
-      winners.length > 0
-        ? winners.map((id) => `<@${id}>`).join(", ")
-        : "Tidak ada peserta yang berpartisipasi.";
-
-    gw.ended = true;
     gw.winners = winners;
-    db.set(`giveaway_${giveawayId}`, gw);
+    await db.set(`giveaway_${giveawayId}`, gw);
 
-    // Siapkan Placeholders
-    const placeholders = {
-      "{prize}": gw.prize,
-      "{winners}": winnersMention,
-      "{host}": `<@${gw.hostId}>`,
-    };
+    const placeholders = buildGiveawayPlaceholders(gw, winners);
 
-    const embedPayload = await getEmbedTemplate(
-      gw.guildId,
-      "giveaway-end",
-      placeholders,
-    );
+    // Kustom/Template Embed untuk Giveaway End
+    const hasCustomEndEmbed = await sendFeatureEmbed({
+      guild: guild,
+      channel: channel,
+      templateName: "giveaway-end",
+      data: placeholders,
+    });
 
-    if (embedPayload) {
-      embedPayload.components = []; // Hapus tombol setelah selesai
-      await message.edit(embedPayload);
+    // Fallback jika tidak ada template khusus /embed "giveaway-end"
+    if (!hasCustomEndEmbed) {
+      if (winners.length > 0) {
+        await channel.send(
+          `🎉 **GIVEAWAY SELESAI!**\n🎁 **Hadiah:** ${gw.prize}\n🏆 **Pemenang:** ${placeholders["{winners}"]}\n👑 **Host:** <@${gw.hostId}>`,
+        );
+      } else {
+        await channel.send(
+          `📢 Giveaway **${gw.prize}** telah berakhir tanpa pemenang.`,
+        );
+      }
     }
 
-    if (winners.length > 0) {
-      await channel.send(
-        `🎉 Selamat kepada ${winnersMention}! Kamu memenangkan **${gw.prize}**!`,
-      );
-    } else {
-      await channel.send(
-        `📢 Giveaway **${gw.prize}** telah berakhir tanpa pemenang.`,
-      );
+    // Matikan tombol partisipasi di pesan lama
+    if (message && message.components && message.components.length > 0) {
+      const row = message.components[0];
+      row.components.forEach((btn) => (btn.data.disabled = true));
+      await message.edit({ components: [row] }).catch(() => {});
     }
   } catch (err) {
     console.error("[Giveaway End Error]:", err);
@@ -65,22 +74,35 @@ async function endGiveaway(client, giveawayId) {
 }
 
 /**
- * Memeriksa giveaway yang expired saat bot baru menyala
+ * Memeriksa giveaway yang expired secara berkala
  */
 function initGiveawayChecker(client) {
-  setInterval(() => {
-    const allData = db.all();
-    const now = Date.now();
+  setInterval(async () => {
+    try {
+      const allData = await db.all();
+      if (!Array.isArray(allData)) return;
 
-    allData.forEach((item) => {
-      if (item.id.startsWith("giveaway_")) {
-        const gw = item.value;
-        if (!gw.ended && gw.endTime <= now) {
-          endGiveaway(client, gw.giveawayId);
+      const now = Date.now();
+
+      for (const item of allData) {
+        if (item && item.id && item.id.startsWith("giveaway_")) {
+          const gw = item.value;
+          if (gw && !gw.ended && gw.endTime <= now) {
+            await endGiveaway(
+              client,
+              gw.giveawayId || item.id.replace("giveaway_", ""),
+            );
+          }
         }
       }
-    });
-  }, 10000); // Cek tiap 10 detik
+    } catch (err) {
+      console.error("[Giveaway Checker Error]:", err);
+    }
+  }, 10000);
 }
 
-module.exports = { endGiveaway, initGiveawayChecker, pickWinners };
+module.exports = {
+  endGiveaway,
+  initGiveawayChecker,
+  pickWinners,
+};

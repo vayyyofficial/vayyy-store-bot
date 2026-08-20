@@ -1,8 +1,9 @@
+// src/utils/placeholder.js
 const db = require("./database");
 const config = require("../config/config");
 
 /**
- * Helper membuat tampilan progress bar teks ulasan
+ * Helper membuat tampilan progress bar teks ulasan toko
  */
 function createProgressBar(count, totalReviews) {
   if (!totalReviews || totalReviews === 0) return "░░░░░░░░░░ 0% (0)";
@@ -10,6 +11,22 @@ function createProgressBar(count, totalReviews) {
   const filledBlocks = Math.round(percentage / 10);
   const emptyBlocks = 10 - filledBlocks;
   return `${"▓".repeat(filledBlocks)}${"░".repeat(emptyBlocks)} ${percentage}% (${count})`;
+}
+
+/**
+ * Helper membuat progress bar visual untuk Leveling System
+ */
+function generateProgressBar(currentXp = 0, requiredXp = 100, size = 10) {
+  if (requiredXp <= 0) requiredXp = 100;
+  const percentage = Math.min(Math.max(currentXp / requiredXp, 0), 1);
+  const progress = Math.round(size * percentage);
+  const emptyProgress = size - progress;
+
+  const progressText = "🟩".repeat(progress);
+  const emptyProgressText = "⬛".repeat(emptyProgress);
+  const percentageText = Math.round(percentage * 100) + "%";
+
+  return `[${progressText}${emptyProgressText}] ${percentageText}`;
 }
 
 /**
@@ -28,19 +45,57 @@ function formatRupiah(number) {
 }
 
 /**
- * Parser Placeholder Dinamis untuk Embed & Pesan Toko
+ * Membangun objek Placeholders khusus untuk Giveaway
+ */
+function buildGiveawayPlaceholders(gw, winners = []) {
+  const participants = Array.isArray(gw.participants) ? gw.participants : [];
+  const winnersList = Array.isArray(winners) ? winners : [];
+
+  const winnersMention =
+    winnersList.length > 0
+      ? winnersList.map((id) => `<@${id}>`).join(", ")
+      : "Tidak ada pemenang.";
+
+  const participantListMention =
+    participants.length > 0
+      ? participants.map((id) => `<@${id}>`).join(", ")
+      : "Belum ada peserta.";
+
+  const placeholders = {
+    "{prize}": gw.prize || "Tanpa Hadiah",
+    "{hadiah}": gw.prize || "Tanpa Hadiah",
+    "{winners_count}": (gw.winnerCount || 1).toString(),
+    "{end_time}": `<t:${Math.floor((gw.endTime || Date.now()) / 1000)}:R>`,
+    "{end_date}": `<t:${Math.floor((gw.endTime || Date.now()) / 1000)}:F>`,
+    "{host}": `<@${gw.hostId}>`,
+    "{participant_count}": participants.length.toString(),
+    "{participant_list}": participantListMention,
+    "{winners}": winnersMention,
+    "{winners_mention}": winnersMention,
+  };
+
+  for (let i = 1; i <= 10; i++) {
+    const winnerId = winnersList[i - 1];
+    placeholders[`{winner${i}}`] = winnerId ? `<@${winnerId}>` : "N/A";
+  }
+
+  return placeholders;
+}
+
+/**
+ * Parser Placeholder Dinamis untuk Seluruh Fitur Bot
  */
 async function parsePlaceholders(text, data = {}) {
   if (!text || typeof text !== "string") return "";
 
   const guild = data.guild || null;
 
-  // Customer / Buyer
+  // Customer / User Utama
   const user = data.user || data.customer || data.member?.user || null;
   const userId = user ? user.id : null;
   const userMentionStr = userId ? `<@${userId}>` : "@User";
 
-  // Seller (User yang RUN Command / Admin / Staff)
+  // Seller / Admin Exec
   const seller = data.seller || data.executor || null;
   const sellerId = seller
     ? typeof seller === "string"
@@ -128,7 +183,7 @@ async function parsePlaceholders(text, data = {}) {
   const discordTimestampShort = `<t:${unixTimestamp}:f>`;
   const discordTimestampRelative = `<t:${unixTimestamp}:R>`;
 
-  // Inisialisasi Variable Stats & Rating Toko
+  // Inisialisasi Variable Leveling & Store Data
   let storeRating = "0.0";
   let totalReviews = 0;
   let stats = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
@@ -136,8 +191,7 @@ async function parsePlaceholders(text, data = {}) {
   let totalTransaksi = 0;
   let totalNominal = 0;
   let totalBuyerCount = 0;
-  let topBuyerTransaksiStr = "Belum Ada";
-  let topBuyerNominalStr = "Belum Ada";
+  let topLevelStr = "Belum Ada";
 
   if (guild) {
     const buyerRoleId =
@@ -170,35 +224,30 @@ async function parsePlaceholders(text, data = {}) {
       storeRating = (totalPoints / totalReviews).toFixed(1);
     }
 
-    const leaderboardData =
-      (await db.get(`leaderboard_testi_${guild.id}`)) || {};
-    let maxCount = 0;
-    let maxCountUser = null;
-    let maxAmount = 0;
-    let maxAmountUser = null;
+    // Ambil User dengan Level Tertinggi ({top_level})
+    const allDbData = (await db.all()) || [];
+    const levelPrefix = `level_${guild.id}_`;
 
-    for (const [uId, uData] of Object.entries(leaderboardData)) {
-      const uCount = uData.count || 0;
-      const uAmount = uData.totalAmount || 0;
+    const topUserObj = allDbData
+      .filter((entry) => entry.id.startsWith(levelPrefix))
+      .map((entry) => ({
+        userId: entry.id.replace(levelPrefix, ""),
+        level: entry.value.level || 1,
+        xp: entry.value.xp || 0,
+      }))
+      .sort((a, b) => b.level - a.level || b.xp - a.xp)[0];
 
-      totalTransaksi += uCount;
-      totalNominal += uAmount;
-
-      if (uCount > maxCount) {
-        maxCount = uCount;
-        maxCountUser = uId;
-      }
-      if (uAmount > maxAmount) {
-        maxAmount = uAmount;
-        maxAmountUser = uId;
-      }
+    if (topUserObj) {
+      topLevelStr = `<@${topUserObj.userId}> (Level ${topUserObj.level})`;
     }
-
-    if (maxCountUser)
-      topBuyerTransaksiStr = `<@${maxCountUser}> (${maxCount} Order)`;
-    if (maxAmountUser)
-      topBuyerNominalStr = `<@${maxAmountUser}> (${formatRupiah(maxAmount)})`;
   }
+
+  // Parameter Leveling Individual User
+  const userLevel = data.level || 1;
+  const userXp = data.xp || 0;
+  const userXpNeeded = data.xp_needed || userLevel * 100;
+  const userProgressBar =
+    data.progressbar || generateProgressBar(userXp, userXpNeeded);
 
   const starEmoji = config.customStarEmoji || "<:emoji_20:1509016228717531256>";
   const userRatingNum = Number(data.rating) || 5;
@@ -206,7 +255,14 @@ async function parsePlaceholders(text, data = {}) {
 
   // Daftar Seluruh Replacements Placeholder
   const replacements = {
-    // --- PLACEHOLDER TRANSAKSI ---
+    // --- LEVELING SYSTEM ---
+    "{level}": userLevel.toString(),
+    "{xp}": userXp.toString(),
+    "{xp_needed}": userXpNeeded.toString(),
+    "{progressbar}": userProgressBar,
+    "{top_level}": topLevelStr,
+
+    // --- TRANSAKSI ---
     "{transaction_id}":
       data.transaction_id || data.order_id || data.trxId || "-",
     "{order_id}": data.order_id || data.transaction_id || data.trxId || "-",
@@ -217,7 +273,7 @@ async function parsePlaceholders(text, data = {}) {
     "{harga}": data.price ? formatRupiah(data.price) : "Rp 0",
     "{seller}": sellerMentionStr,
 
-    // --- PLACEHOLDER BULAN & TAHUN ---
+    // --- BULAN & TAHUN ---
     "{bulan}": currentMonthId,
     "{month}": currentMonthId,
     "{bulan_singkat}": currentMonthShortId,
@@ -252,12 +308,10 @@ async function parsePlaceholders(text, data = {}) {
     "{server_icon}": guild ? guild.iconURL({ forceStatic: false }) || "" : "",
     "{member_count}": guild ? guild.memberCount.toString() : "0",
 
-    // --- TRANSAKSI & LEADERBOARD STORE ---
+    // --- TRANSAKSI & STORE ---
     "{total_buyer}": totalBuyerCount.toString(),
     "{total_transaksi}": totalTransaksi.toString(),
     "{total_nominal}": formatRupiah(totalNominal),
-    "{top_buyer_transaksi}": topBuyerTransaksiStr,
-    "{top_buyer_nominal}": topBuyerNominalStr,
 
     // --- RATING SUMMARY & PROGRESS BAR ---
     "{store_rating}": storeRating,
@@ -308,4 +362,10 @@ async function parsePlaceholders(text, data = {}) {
   return parsedText;
 }
 
-module.exports = { parsePlaceholders };
+module.exports = {
+  parsePlaceholders,
+  buildGiveawayPlaceholders,
+  createProgressBar,
+  generateProgressBar,
+  formatRupiah,
+};

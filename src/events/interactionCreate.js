@@ -1,3 +1,4 @@
+// src/events/interactionCreate.js
 const {
   ModalBuilder,
   TextInputBuilder,
@@ -5,6 +6,7 @@ const {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
+  MessageFlags, // Added MessageFlags
 } = require("discord.js");
 const db = require("../utils/database");
 const { sendFeatureEmbed } = require("../utils/featureEmbed");
@@ -26,7 +28,7 @@ module.exports = {
         console.error(`Error /${interaction.commandName}:`, err);
         const reply = {
           content: "❌ Terjadi kesalahan saat menjalankan perintah!",
-          flags: 64,
+          flags: MessageFlags.Ephemeral, // Standar resmi Discord.js v14
         };
         await (
           interaction.replied || interaction.deferred
@@ -48,6 +50,40 @@ module.exports = {
 
     // 3. BUTTON ACTIONS HANDLER
     if (interaction.isButton()) {
+      // --- HANDLER IKUT GIVEAWAY ---
+      if (interaction.customId === "gw_join") {
+        const msgId = interaction.message.id;
+        const gw = await db.get(`giveaway_${msgId}`);
+
+        if (!gw || gw.ended) {
+          return interaction.reply({
+            content: "❌ Giveaway ini sudah berakhir!",
+            flags: MessageFlags.Ephemeral,
+          });
+        }
+
+        if (!Array.isArray(gw.participants)) {
+          gw.participants = [];
+        }
+
+        const userId = interaction.user.id;
+        if (gw.participants.includes(userId)) {
+          gw.participants = gw.participants.filter((id) => id !== userId);
+          await db.set(`giveaway_${msgId}`, gw);
+          return interaction.reply({
+            content: "❌ Kamu telah batal mengikuti giveaway ini.",
+            flags: MessageFlags.Ephemeral,
+          });
+        } else {
+          gw.participants.push(userId);
+          await db.set(`giveaway_${msgId}`, gw);
+          return interaction.reply({
+            content: "🎉 Kamu berhasil terdaftar dalam giveaway ini!",
+            flags: MessageFlags.Ephemeral,
+          });
+        }
+      }
+
       // --- OPEN EDIT MENU DARI /EMBED CREATE ---
       if (interaction.customId.startsWith("btn_open_edit_menu_")) {
         const name = interaction.customId.replace("btn_open_edit_menu_", "");
@@ -206,7 +242,7 @@ module.exports = {
       // --- DIRECT ACTION: SEND MESSAGE ---
       if (interaction.customId.startsWith("btn_action_send_")) {
         try {
-          await interaction.deferReply({ flags: 64 });
+          await interaction.deferReply({ flags: MessageFlags.Ephemeral });
         } catch (e) {
           if (e.code === 10062) return;
         }
@@ -253,7 +289,7 @@ module.exports = {
           .reply({
             content: `⚠️ **Konfirmasi Penghapusan**\nApakah kamu yakin ingin menghapus template \`${name}\` secara permanen?`,
             components: [confirmRow],
-            flags: 64,
+            flags: MessageFlags.Ephemeral,
           })
           .catch((e) => e.code !== 10062 && console.error(e));
       }
@@ -326,7 +362,7 @@ module.exports = {
           .reply({
             content:
               "❌ **Gagal Menyimpan!** Kamu harus mengisi minimal **Pesan Teks Biasa** atau **Deskripsi Embed**.",
-            flags: 64,
+            flags: MessageFlags.Ephemeral,
           })
           .catch((e) => e.code !== 10062 && console.error(e));
       }
@@ -346,7 +382,7 @@ module.exports = {
       return interaction
         .reply({
           content: `✅ Pengaturan General untuk template \`${name}\` berhasil diperbarui!`,
-          flags: 64,
+          flags: MessageFlags.Ephemeral,
         })
         .catch((e) => e.code !== 10062 && console.error(e));
     }
@@ -428,7 +464,7 @@ module.exports = {
       return interaction
         .reply({
           content: `✅ Button & Selection Menu untuk template \`${name}\` telah diperbarui!`,
-          flags: 64,
+          flags: MessageFlags.Ephemeral,
         })
         .catch((e) => e.code !== 10062 && console.error(e));
     }
@@ -449,7 +485,7 @@ module.exports = {
         return interaction
           .reply({
             content: "❌ Data template atau opsi tidak ditemukan.",
-            flags: 64,
+            flags: MessageFlags.Ephemeral,
           })
           .catch((e) => e.code !== 10062 && console.error(e));
       }
@@ -462,7 +498,7 @@ module.exports = {
         return interaction
           .reply({
             content: "❌ Opsi yang dipilih tidak valid.",
-            flags: 64,
+            flags: MessageFlags.Ephemeral,
           })
           .catch((e) => e.code !== 10062 && console.error(e));
       }
@@ -484,7 +520,7 @@ module.exports = {
         return interaction
           .reply({
             content: `🔗 Silakan buka tautan berikut: ${selectedOption.targetUrl}`,
-            flags: 64,
+            flags: MessageFlags.Ephemeral,
           })
           .catch((e) => e.code !== 10062 && console.error(e));
       }
@@ -492,7 +528,7 @@ module.exports = {
       return interaction
         .reply({
           content: `Kamu memilih: **${selectedOption.label || interaction.values[0]}**`,
-          flags: 64,
+          flags: MessageFlags.Ephemeral,
         })
         .catch((e) => e.code !== 10062 && console.error(e));
     }

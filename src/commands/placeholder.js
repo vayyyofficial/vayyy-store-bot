@@ -1,3 +1,4 @@
+// src/commands/placeholders.js
 const { SlashCommandBuilder, EmbedBuilder } = require("discord.js");
 const config = require("../config/config");
 
@@ -16,6 +17,28 @@ module.exports = {
       )
       .setColor(config.embedColor || "#FAB502")
       .addFields(
+        {
+          name: "📊 Leveling System Placeholders",
+          value:
+            "`{level}` — Level member saat ini (Contoh: `5`)\n" +
+            "`{xp}` — Jumlah sisa XP member saat ini (Contoh: `45`)\n" +
+            "`{xp_needed}` — Target XP yang dibutuhkan untuk naik level berikutnya\n" +
+            "`{progressbar}` — Progress bar visual kenaikan level (`[🟩🟩⬛⬛] 50%`)\n" +
+            "`{top_level}` — Tag & level member dengan tingkat tertinggi di server",
+        },
+        {
+          name: "🎉 Giveaway Placeholders",
+          value:
+            "`{prize}` / `{hadiah}` — Nama hadiah giveaway\n" +
+            "`{winners_count}` — Jumlah kuota pemenang (Maksimal 10)\n" +
+            "`{end_time}` — Timer waktu mundur Discord (`<t:TIMESTAMP:R>`)\n" +
+            "`{end_date}` — Tanggal & waktu lengkap giveaway selesai\n" +
+            "`{host}` — Tag/mention host pembuat giveaway\n" +
+            "`{participant_count}` — Total jumlah peserta yang ikut\n" +
+            "`{participant_list}` — Daftar tag seluruh peserta\n" +
+            "`{winners}` / `{winners_mention}` — Tag seluruh pemenang yang terpilih\n" +
+            "`{winner1}` s/d `{winner10}` — Tag pemenang secara spesifik per urutan",
+        },
         {
           name: "🌐 System & Server",
           value:

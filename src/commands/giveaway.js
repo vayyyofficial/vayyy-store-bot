@@ -5,11 +5,13 @@ const {
   ButtonBuilder,
   ButtonStyle,
   ActionRowBuilder,
+  EmbedBuilder,
 } = require("discord.js");
 const ms = require("ms");
 const db = require("../utils/database");
-const { getEmbedTemplate } = require("../utils/featureEmbed");
+const { sendFeatureEmbed } = require("../utils/featureEmbed");
 const { endGiveaway, pickWinners } = require("../utils/giveawayManager");
+const { buildGiveawayPlaceholders } = require("../utils/placeholder");
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -29,7 +31,9 @@ module.exports = {
         .addIntegerOption((opt) =>
           opt
             .setName("pemenang")
-            .setDescription("Jumlah pemenang")
+            .setDescription("Jumlah pemenang (Maksimal 10)")
+            .setMinValue(1)
+            .setMaxValue(10)
             .setRequired(true),
         )
         .addStringOption((opt) =>
@@ -90,19 +94,27 @@ module.exports = {
       const winnerCount = interaction.options.getInteger("pemenang");
       const prize = interaction.options.getString("hadiah");
 
+      if (winnerCount > 10) {
+        return interaction.reply({
+          content:
+            "❌ Maksimal jumlah pemenang untuk giveaway ini adalah 10 orang!",
+          flags: 64,
+        });
+      }
+
       const durationMs = ms(durationStr);
       if (!durationMs) {
         return interaction.reply({
           content:
             "❌ Format durasi tidak valid! Gunakan format seperti `10m`, `1h`, atau `1d`.",
-          ephemeral: true,
+          flags: 64,
         });
       }
 
       const endTime = Date.now() + durationMs;
-      await interaction.deferReply({ ephemeral: true });
+      await interaction.deferReply({ flags: 64 });
 
-      // Buat Tombol Ikut
+      // Tombol Ikut Giveaway
       const joinBtn = new ButtonBuilder()
         .setCustomId("gw_join")
         .setLabel("🎉 Ikut Giveaway")
@@ -110,31 +122,37 @@ module.exports = {
 
       const row = new ActionRowBuilder().addComponents(joinBtn);
 
-      const placeholders = {
-        "{prize}": prize,
-        "{winners_count}": winnerCount.toString(),
-        "{end_time}": `<t:${Math.floor(endTime / 1000)}:R>`,
-        "{host}": interaction.user.toString(),
+      const tempGwData = {
+        prize: prize,
+        winnerCount: winnerCount,
+        endTime: endTime,
+        hostId: interaction.user.id,
+        participants: [],
       };
 
-      const embedPayload = await getEmbedTemplate(
-        guildId,
-        "giveaway-start",
-        placeholders,
-      );
-      let gwMessage;
+      const placeholders = buildGiveawayPlaceholders(tempGwData);
 
-      if (embedPayload) {
-        embedPayload.components = [row];
-        gwMessage = await interaction.channel.send(embedPayload);
-      } else {
+      let gwMessage = null;
+      const customSent = await sendFeatureEmbed({
+        guild: interaction.guild,
+        channel: interaction.channel,
+        templateName: "giveaway-start",
+        data: placeholders,
+        extraComponents: [row],
+      });
+
+      if (!customSent) {
         gwMessage = await interaction.channel.send({
-          content: `🎉 **GIVEAWAY STARTED!**\n**Hadiah:** ${prize}\n**Pemenang:** ${winnerCount}\n**Berakhir:** <t:${Math.floor(endTime / 1000)}:R>\nHost: ${interaction.user}`,
+          content: `🎉 **GIVEAWAY STARTED!**\n\n🎁 **Hadiah:** ${prize}\n🏆 **Pemenang:** ${winnerCount}\n⏳ **Berakhir:** <t:${Math.floor(
+            endTime / 1000,
+          )}:R>\n👑 **Host:** ${interaction.user}`,
           components: [row],
         });
+      } else {
+        const msgs = await interaction.channel.messages.fetch({ limit: 1 });
+        gwMessage = msgs.first();
       }
 
-      // Simpan ke DB
       const gwData = {
         giveawayId: gwMessage.id,
         messageId: gwMessage.id,
@@ -148,54 +166,134 @@ module.exports = {
         ended: false,
       };
 
-      db.set(`giveaway_${gwMessage.id}`, gwData);
+      await db.set(`giveaway_${gwMessage.id}`, gwData);
       await interaction.editReply("✅ Giveaway berhasil dimulai!");
     } else if (sub === "end") {
       const msgId = interaction.options.getString("message_id");
       await endGiveaway(interaction.client, msgId);
       await interaction.reply({
         content: "✅ Giveaway telah dihentikan dan diundi!",
-        ephemeral: true,
+        flags: 64,
       });
     } else if (sub === "reroll") {
       const msgId = interaction.options.getString("message_id");
-      const gw = db.get(`giveaway_${msgId}`);
+      const gw = await db.get(`giveaway_${msgId}`);
 
       if (!gw || !gw.ended) {
         return interaction.reply({
           content: "❌ Giveaway tidak ditemukan atau belum berakhir!",
-          ephemeral: true,
+          flags: 64,
         });
       }
 
       const newWinners = pickWinners(gw.participants, gw.winnerCount);
-      const winnersMention =
-        newWinners.length > 0
-          ? newWinners.map((id) => `<@${id}>`).join(", ")
-          : "Tidak ada peserta.";
+      gw.winners = newWinners;
+      await db.set(`giveaway_${msgId}`, gw);
 
-      await interaction.reply(
-        `🔄 **REROLL PEMENANG!**\nPemenang baru untuk **${gw.prize}** adalah: ${winnersMention}!`,
-      );
+      const placeholders = buildGiveawayPlaceholders(gw, newWinners);
+
+      const customReroll = await sendFeatureEmbed({
+        guild: interaction.guild,
+        channel: interaction.channel,
+        templateName: "giveaway-reroll",
+        data: placeholders,
+      });
+
+      if (!customReroll) {
+        await interaction.reply({
+          content: `🔄 **REROLL PEMENANG!**\nPemenang baru untuk **${gw.prize}** adalah: ${placeholders["{winners}"]}`,
+        });
+      } else {
+        await interaction.reply({
+          content: "🔄 **Reroll pemenang berhasil dieksekusi!**",
+          flags: 64,
+        });
+      }
     } else if (sub === "edit") {
       const msgId = interaction.options.getString("message_id");
       const newPrize = interaction.options.getString("hadiah_baru");
-      const gw = db.get(`giveaway_${msgId}`);
+      const gw = await db.get(`giveaway_${msgId}`);
 
       if (!gw || gw.ended) {
         return interaction.reply({
           content: "❌ Giveaway tidak ditemukan atau sudah berakhir!",
-          ephemeral: true,
+          flags: 64,
         });
       }
 
+      // Update data di database
+      const oldPrize = gw.prize;
       gw.prize = newPrize;
-      db.set(`giveaway_${msgId}`, gw);
+      await db.set(`giveaway_${msgId}`, gw);
 
-      await interaction.reply({
-        content: `✅ Hadiah giveaway berhasil diubah menjadi **${newPrize}**!`,
-        ephemeral: true,
-      });
+      // Real-time Edit Pesan Discord
+      try {
+        const channel = await interaction.guild.channels
+          .fetch(gw.channelId)
+          .catch(() => null);
+
+        if (!channel) {
+          return interaction.reply({
+            content: "❌ Channel giveaway tidak ditemukan!",
+            flags: 64,
+          });
+        }
+
+        const message = await channel.messages.fetch(msgId).catch(() => null);
+
+        if (!message) {
+          return interaction.reply({
+            content: "❌ Pesan giveaway tidak ditemukan di channel!",
+            flags: 64,
+          });
+        }
+
+        // Cek apakah pesan asli menggunakan Embed atau Text biasa
+        if (message.embeds && message.embeds.length > 0) {
+          const oldEmbed = message.embeds[0];
+          const updatedEmbed = EmbedBuilder.from(oldEmbed);
+
+          // Update teks hadiah di Description jika ada
+          if (oldEmbed.description) {
+            updatedEmbed.setDescription(
+              oldEmbed.description.replaceAll(oldPrize, newPrize),
+            );
+          }
+
+          // Update teks hadiah di Fields jika ada
+          if (oldEmbed.fields && oldEmbed.fields.length > 0) {
+            const updatedFields = oldEmbed.fields.map((field) => ({
+              ...field,
+              value: field.value.replaceAll(oldPrize, newPrize),
+            }));
+            updatedEmbed.setFields(updatedFields);
+          }
+
+          await message.edit({
+            embeds: [updatedEmbed],
+            components: message.components,
+          });
+        } else {
+          // Edit pesan berupa teks standar
+          await message.edit({
+            content: `🎉 **GIVEAWAY STARTED!**\n\n🎁 **Hadiah:** ${newPrize}\n🏆 **Pemenang:** ${gw.winnerCount}\n⏳ **Berakhir:** <t:${Math.floor(
+              gw.endTime / 1000,
+            )}:R>\n👑 **Host:** <@${gw.hostId}>`,
+            components: message.components,
+          });
+        }
+
+        await interaction.reply({
+          content: `✅ Hadiah giveaway berhasil diubah menjadi **${newPrize}** dan pesan Discord telah diperbarui!`,
+          flags: 64,
+        });
+      } catch (err) {
+        console.error("Gagal memperbarui pesan giveaway di Discord:", err);
+        await interaction.reply({
+          content: `⚠️ Hadiah diubah di database, tetapi gagal mengedit pesan: ${err.message}`,
+          flags: 64,
+        });
+      }
     }
   },
 };

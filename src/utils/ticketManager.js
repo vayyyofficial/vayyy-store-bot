@@ -3,6 +3,7 @@ const {
   ChannelType,
   PermissionFlagsBits,
   AttachmentBuilder,
+  MessageFlags,
 } = require("discord.js");
 const discordTranscripts = require("discord-html-transcripts");
 const db = require("./database");
@@ -22,7 +23,7 @@ async function moveTicketStatus(interaction, newStatus, categoryConfigKey) {
   if (!ticketData) {
     return interaction.reply({
       content: "❌ Command ini hanya dapat digunakan di dalam channel tiket!",
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
   }
 
@@ -85,7 +86,7 @@ async function closeTicket(interaction) {
   if (!ticketData) {
     return interaction.reply({
       content: "❌ Command ini hanya dapat digunakan di dalam channel tiket!",
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
   }
 

@@ -1,11 +1,25 @@
 // src/utils/aiHandler.js
+require("dotenv").config();
 const { GoogleGenAI } = require("@google/genai");
 const db = require("./database");
 const { getEmbedTemplate } = require("./featureEmbed");
 
-// Inisialisasi Gemini Client
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 const aiCooldowns = new Set();
+let aiClient = null;
+
+/**
+ * Mengambil / Inisialisasi GoogleGenAI Instance secara Lazy
+ */
+function getAIClient() {
+  if (!aiClient) {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      throw new Error("GEMINI_API_KEY tidak ditemukan di file .env");
+    }
+    aiClient = new GoogleGenAI({ apiKey });
+  }
+  return aiClient;
+}
 
 /**
  * Memproses auto-reply Gemini AI di channel khusus AI
@@ -19,7 +33,7 @@ async function handleAIChat(message) {
   const aiChannelId = db.get(`config_${guildId}.aiChannel`);
 
   // Hanya merespon di Channel AI yang sudah di-set
-  if (message.channel.id !== aiChannelId) return;
+  if (!aiChannelId || message.channel.id !== aiChannelId) return;
 
   // 1. Cek Cooldown Anti-Spam (5 Detik)
   if (aiCooldowns.has(userId)) {
@@ -53,6 +67,8 @@ async function handleAIChat(message) {
   await message.channel.sendTyping();
 
   try {
+    const ai = getAIClient();
+
     // Panggil Model Gemini (gemini-2.5-flash)
     const response = await ai.models.generateContent({
       model: "gemini-2.5-flash",

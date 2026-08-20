@@ -7,18 +7,16 @@ const commands = [];
 const commandsPath = path.join(__dirname, "src", "commands");
 
 if (fs.existsSync(commandsPath)) {
-  const commandFolders = fs.readdirSync(commandsPath);
+  function readCommands(dir) {
+    const files = fs.readdirSync(dir);
 
-  for (const folder of commandFolders) {
-    const subFolderPath = path.join(commandsPath, folder);
+    for (const file of files) {
+      const filePath = path.join(dir, file);
+      const stat = fs.statSync(filePath);
 
-    if (fs.statSync(subFolderPath).isDirectory()) {
-      const commandFiles = fs
-        .readdirSync(subFolderPath)
-        .filter((file) => file.endsWith(".js"));
-
-      for (const file of commandFiles) {
-        const filePath = path.join(subFolderPath, file);
+      if (stat.isDirectory()) {
+        readCommands(filePath);
+      } else if (file.endsWith(".js")) {
         const command = require(filePath);
 
         if ("data" in command && "execute" in command) {
@@ -27,6 +25,8 @@ if (fs.existsSync(commandsPath)) {
       }
     }
   }
+
+  readCommands(commandsPath);
 }
 
 const token = process.env.DISCORD_TOKEN;
@@ -47,16 +47,23 @@ const rest = new REST({ version: "10" }).setToken(token);
     console.log(`🚀 Menendaftarkan ${commands.length} slash commands...`);
 
     if (guildId) {
+      // 1. Bersihkan command Global agar tidak duplikat
+      await rest.put(Routes.applicationCommands(clientId), { body: [] });
+
+      // 2. Daftarkan hanya ke Guild/Server tertentu
       await rest.put(Routes.applicationGuildCommands(clientId, guildId), {
         body: commands,
       });
+      console.log(
+        "✅ Slash commands berhasil didaftarkan secara Guild-specific!",
+      );
     } else {
+      // Jika GUILD_ID kosong, daftarkan secara Global
       await rest.put(Routes.applicationCommands(clientId), {
         body: commands,
       });
+      console.log("✅ Slash commands berhasil didaftarkan secara Global!");
     }
-
-    console.log("✅ Slash commands berhasil didaftarkan ke Discord API!");
   } catch (error) {
     console.error("❌ Gagal mendaftarkan slash commands:", error);
   }
